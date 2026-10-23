@@ -2004,6 +2004,7 @@ INT CALLBACK XgBrowseCallbackProc(HWND hwnd, UINT uMsg, LPARAM /*lParam*/, LPARA
 // 印刷。
 
 // 印刷する。
+// Print.
 static void XgPrintIt(HDC hdc, PRINTDLGW* ppd, bool bPrintAnswer)
 {
     LOGFONTW lf;
@@ -2013,24 +2014,15 @@ static void XgPrintIt(HDC hdc, PRINTDLGW* ppd, bool bPrintAnswer)
 
     const int nVert = ::GetDeviceCaps(hdc, VERTSIZE);
     const int nHorz = ::GetDeviceCaps(hdc, HORZSIZE);
-    if (nVert < nHorz) {
-        // 印刷用紙が横長。メッセージを表示して終了。
-        ::XgCenterMessageBoxW(xg_hMainWnd, XgLoadStringDx1(IDS_SETPORTRAIT), nullptr,
-                            MB_ICONERROR);
-        ::DeleteDC(hdc);
-        ::GlobalFree(ppd->hDevMode);
-        ::GlobalFree(ppd->hDevNames);
-        return;
-    }
+    const bool bLandscape = (nHorz > nVert);
 
     DOCINFOW di;
     ZeroMemory(&di, sizeof(di));
     di.cbSize = sizeof(di);
     di.lpszDocName = XgLoadStringDx1(IDS_CROSSWORD);
 
-    // 指定された部数を印刷する。
+    // Print the requested number of copies.
     for (int i = 0; i < ppd->nCopies; i++) {
-        // 文書を開始する。
         if (::StartDocW(hdc, &di) <= 0)
             continue;
 
@@ -2038,174 +2030,325 @@ static void XgPrintIt(HDC hdc, PRINTDLGW* ppd, bool bPrintAnswer)
         XGStringW str, strMarkWord, strHints;
         int yLast = 0;
 
-        // 論理ピクセルのアスペクト比を取得する。
         const int nLogPixelX = ::GetDeviceCaps(hdc, LOGPIXELSX);
         const int nLogPixelY = ::GetDeviceCaps(hdc, LOGPIXELSY);
-
-        // 用紙のピクセルサイズを取得する。
         const int cxPaper = ::GetDeviceCaps(hdc, HORZRES);
         const int cyPaper = ::GetDeviceCaps(hdc, VERTRES);
 
-        // ページ開始。
         if (::StartPage(hdc) > 0) {
-            // 二重マス単語を描画する。
-            if (bPrintAnswer && XgGetMarkWord(&xg_solution, strMarkWord)) {
-                // 既定のフォント情報を取得する。
+            const bool bHasMarkWord =
+                bPrintAnswer && XgGetMarkWord(&xg_solution, strMarkWord);
+
+            // Draw the marked answer word.
+            if (bHasMarkWord) {
                 hFont = static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
                 ::GetObjectW(hFont, sizeof(LOGFONTW), &lf);
 
-                // フォント名を取得する。
-                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName), XgLoadStringDx1(IDS_MONOFONT));
+                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName),
+                              XgLoadStringDx1(IDS_MONOFONT));
                 if (xg_szCellFont[0])
-                    StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName), xg_szCellFont);
+                    StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName),
+                                  xg_szCellFont);
 
-                // フォント情報を設定する。
-                lf.lfHeight = cyPaper / 2 / 15;
+                lf.lfHeight = bLandscape
+                    ? -MulDiv(10, nLogPixelY, 72)
+                    : cyPaper / 2 / 15;
                 lf.lfWidth = 0;
                 lf.lfWeight = FW_NORMAL;
                 lf.lfQuality = ANTIALIASED_QUALITY;
 
-                // 二重マス単語を描画する。
                 hFont = ::CreateFontIndirectW(&lf);
                 hFontOld = ::SelectObject(hdc, hFont);
-                rc = { cxPaper / 8, cyPaper / 16, cxPaper * 7 / 8, cyPaper / 8 };
+
+                if (bLandscape)
+                    rc = { cxPaper * 52 / 100, cyPaper / 24,
+                           cxPaper * 19 / 20, cyPaper / 10 };
+                else
+                    rc = { cxPaper / 8, cyPaper / 16,
+                           cxPaper * 7 / 8, cyPaper / 8 };
+
                 str = XgLoadStringDx1(IDS_ANSWER);
                 str += strMarkWord;
                 ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
                     DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX);
+
                 ::SelectObject(hdc, hFontOld);
                 ::DeleteFont(hFont);
             }
 
-            // サイズを取得する。
+            // Get crossword size.
             SIZE siz;
             XgGetXWordExtent(&siz);
 
-            // EMFオブジェクトを作成する。
-            HDC hdcEMF = ::CreateEnhMetaFileW(hdc, nullptr, nullptr, XgLoadStringDx1(IDS_APPNAME));
+            // Create EMF and draw crossword into it.
+            HDC hdcEMF = ::CreateEnhMetaFileW(
+                hdc, nullptr, nullptr, XgLoadStringDx1(IDS_APPNAME));
             if (hdcEMF != nullptr) {
-                // EMFオブジェクトにクロスワードを描画する。
                 XgSetSizeOfEMF(hdcEMF, &siz);
                 if (bPrintAnswer)
                     XgDrawXWord(xg_solution, hdcEMF, &siz, DRAW_MODE_EMF);
                 else
                     XgDrawXWord(xg_xword, hdcEMF, &siz, DRAW_MODE_EMF);
 
-                // EMFオブジェクトを閉じる。
                 HENHMETAFILE hEMF = ::CloseEnhMetaFile(hdcEMF);
                 if (hEMF != nullptr) {
-                    // EMFを描画する領域を計算する。
                     int x, y, cx, cy;
-                    if (xg_nCols >= 10) {
+
+                    if (bLandscape) {
+                        // Landscape: crossword on the left, clues on the right.
+                        const int left = cxPaper / 20;
+                        const int top = cyPaper / 10;
+                        const int maxCx = cxPaper * 42 / 100;
+                        const int maxCy = cyPaper * 4 / 5;
+
+                        cx = maxCx;
+                        cy = cx * nLogPixelY * siz.cy /
+                             nLogPixelX / siz.cx;
+
+                        if (cy > maxCy) {
+                            cy = maxCy;
+                            cx = cy * nLogPixelX * siz.cx /
+                                 nLogPixelY / siz.cy;
+                        }
+
+                        x = left + (maxCx - cx) / 2;
+                        y = top + (maxCy - cy) / 2;
+                    } else if (xg_nCols >= 10) {
                         x = cxPaper / 6;
                         y = cyPaper / 8;
                         cx = cxPaper * 2 / 3;
-                        cy = cxPaper * nLogPixelY * siz.cy / nLogPixelX / siz.cx * 2 / 3;
+                        cy = cxPaper * nLogPixelY * siz.cy /
+                             nLogPixelX / siz.cx * 2 / 3;
                     } else {
                         x = cxPaper / 4;
                         y = cyPaper / 8;
                         cx = cxPaper / 2;
-                        cy = cxPaper * nLogPixelY * siz.cy / nLogPixelX / siz.cx / 2;
+                        cy = cxPaper * nLogPixelY * siz.cy /
+                             nLogPixelX / siz.cx / 2;
                     }
-                    rc = { x, y, x + cx, y + cy };
 
-                    // EMFを描画する。
+                    rc = { x, y, x + cx, y + cy };
                     ::PlayEnhMetaFile(hdc, hEMF, &rc);
                     ::DeleteEnhMetaFile(hEMF);
                     yLast = y + cy;
                 }
             }
 
-            // ヒントを取得する。
+            // Get clues.
             if (xg_bSolved) {
-                XG_HintsWnd::UpdateHintData(); // ヒントに変更があれば、更新する。
+                XG_HintsWnd::UpdateHintData();
                 XgGetHintsStr(xg_solution, xg_strHints, 2, bPrintAnswer);
                 strHints = xg_strHints;
             } else {
                 strHints.clear();
             }
 
-            // 文字色をセットする。
             ::SetTextColor(hdc, RGB(0, 0, 0));
 
-            // 既定のフォント情報を取得する。
             hFont = static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
             ::GetObjectW(hFont, sizeof(LOGFONTW), &lf);
 
-            // フォント名を取得する。
-            StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName), XgLoadStringDx1(IDS_MONOFONT));
+            StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName),
+                          XgLoadStringDx1(IDS_MONOFONT));
             if (xg_szCellFont[0])
-                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName), xg_szCellFont);
+                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName),
+                              xg_szCellFont);
 
-            // フォント情報を設定する。
-            lf.lfHeight = cyPaper / 2 / 45;
-            lf.lfWidth = 0;
-            lf.lfWeight = FW_NORMAL;
-            lf.lfQuality = ANTIALIASED_QUALITY;
-            hFont = ::CreateFontIndirectW(&lf);
-            hFontOld = ::SelectObject(hdc, hFont);
+            if (bLandscape) {
+                // Use almost the full right half for clues.
+                const RECT rcHintArea = {
+                    cxPaper * 52 / 100,
+                    bHasMarkWord ? cyPaper / 9 : cyPaper / 16,
+                    cxPaper * 19 / 20,
+                    cyPaper * 15 / 16
+                };
 
-            // ヒントを一行ずつ描画する。
-            rc = { cxPaper / 8, cyPaper / 2, cxPaper * 7 / 8, cyPaper * 8 / 9 };
-            for (ichOld = ich = 0; rc.bottom <= cyPaper * 8 / 9; ichOld = ich + 1) {
-                ich = strHints.find(L"\n", ichOld);
-                if (ich == XGStringW::npos)
-                    break;
-                str = strHints.substr(0, ich);  // 一行取り出す。
-                rc = { cxPaper / 8, yLast, cxPaper * 7 / 8, cyPaper * 8 / 9 };
-                ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
-                    DT_LEFT | DT_TOP | DT_CALCRECT | DT_NOPREFIX | DT_WORDBREAK);
-            }
-            // 最後の行を描画する。
-            rc = { cxPaper / 8, yLast, cxPaper * 7 / 8, cyPaper * 8 / 9 };
-            if (ich == XGStringW::npos) {
-                str = strHints;
-                ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
-                    DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX | DT_WORDBREAK);
-                strHints.clear();
-            } else {
-                str = strHints.substr(0, ichOld);
-                ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
-                    DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX | DT_WORDBREAK);
-                strHints = strHints.substr(ichOld);
-            }
+                // Try 10 pt down to 6 pt and use the largest size that fits.
+                int pointSize = 10;
+                for (; pointSize >= 6; --pointSize) {
+                    lf.lfHeight = -MulDiv(pointSize, nLogPixelY, 72);
+                    lf.lfWidth = 0;
+                    lf.lfWeight = FW_NORMAL;
+                    lf.lfQuality = ANTIALIASED_QUALITY;
 
-            // 文字のフォントの選択を解除して削除する。
-            ::SelectObject(hdc, hFontOld);
-            ::DeleteFont(hFont);
+                    HFONT hTrial = ::CreateFontIndirectW(&lf);
+                    HGDIOBJ hTrialOld = ::SelectObject(hdc, hTrial);
 
-            // ページ終了。
-            ::EndPage(hdc);
-        }
+                    RECT rcMeasure = rcHintArea;
+                    ::DrawTextW(hdc, strHints.data(),
+                        static_cast<int>(strHints.size()), &rcMeasure,
+                        DT_LEFT | DT_TOP | DT_CALCRECT |
+                        DT_NOPREFIX | DT_WORDBREAK);
 
-        // ヒントの残りを描画する。
-        if (!strHints.empty()) {
-            // ページ開始。
-            if (::StartPage(hdc) > 0) {
-                // 文字のフォントを作成する。
-                hFont = static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
-                ::GetObjectW(hFont, sizeof(LOGFONTW), &lf);
-                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName), XgLoadStringDx1(IDS_MONOFONT));
-                lf.lfHeight = cyPaper / 2 / 45;
+                    ::SelectObject(hdc, hTrialOld);
+                    ::DeleteFont(hTrial);
+
+                    if (rcMeasure.bottom <= rcHintArea.bottom)
+                        break;
+                }
+                if (pointSize < 6)
+                    pointSize = 6;
+
+                lf.lfHeight = -MulDiv(pointSize, nLogPixelY, 72);
                 lf.lfWidth = 0;
                 lf.lfWeight = FW_NORMAL;
                 lf.lfQuality = ANTIALIASED_QUALITY;
 
-                // ヒントの残りを描画する。
+                hFont = ::CreateFontIndirectW(&lf);
+                hFontOld = ::SelectObject(hdc, hFont);
+
+                if (!strHints.empty()) {
+                    RECT rcMeasure = rcHintArea;
+                    ::DrawTextW(hdc, strHints.data(),
+                        static_cast<int>(strHints.size()), &rcMeasure,
+                        DT_LEFT | DT_TOP | DT_CALCRECT |
+                        DT_NOPREFIX | DT_WORDBREAK);
+
+                    if (rcMeasure.bottom <= rcHintArea.bottom) {
+                        // Everything fits on page 1. Center the clue block vertically
+                        // within the available right-hand column.
+                        const int clueHeight = rcMeasure.bottom - rcMeasure.top;
+                        const int areaHeight = rcHintArea.bottom - rcHintArea.top;
+                        const int clueTop = rcHintArea.top +
+                            (areaHeight - clueHeight) / 2;
+
+                        rc = {
+                            rcHintArea.left,
+                            clueTop,
+                            rcHintArea.right,
+                            clueTop + clueHeight
+                        };
+                        ::DrawTextW(hdc, strHints.data(),
+                            static_cast<int>(strHints.size()), &rc,
+                            DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+                        strHints.clear();
+                    } else {
+                        // Rare fallback: keep as much as possible on page 1.
+                        size_t lastGood = 0;
+                        size_t pos = 0;
+
+                        while (pos < strHints.size()) {
+                            const size_t nl = strHints.find(L'\n', pos);
+                            const size_t end = (nl == XGStringW::npos)
+                                ? strHints.size()
+                                : nl + 1;
+
+                            XGStringW candidate = strHints.substr(0, end);
+                            RECT rcMeasure2 = rcHintArea;
+                            ::DrawTextW(hdc, candidate.data(),
+                                static_cast<int>(candidate.size()), &rcMeasure2,
+                                DT_LEFT | DT_TOP | DT_CALCRECT |
+                                DT_NOPREFIX | DT_WORDBREAK);
+
+                            if (rcMeasure2.bottom > rcHintArea.bottom)
+                                break;
+
+                            lastGood = end;
+                            if (nl == XGStringW::npos)
+                                break;
+                            pos = end;
+                        }
+
+                        if (lastGood > 0) {
+                            str = strHints.substr(0, lastGood);
+                            rc = rcHintArea;
+                            ::DrawTextW(hdc, str.data(),
+                                static_cast<int>(str.size()), &rc,
+                                DT_LEFT | DT_TOP | DT_NOPREFIX | DT_WORDBREAK);
+                            strHints = strHints.substr(lastGood);
+                        }
+                    }
+                }
+
+                ::SelectObject(hdc, hFontOld);
+                ::DeleteFont(hFont);
+            } else {
+                // Original portrait layout.
+                lf.lfHeight = cyPaper / 2 / 45;
+                lf.lfWidth = 0;
+                lf.lfWeight = FW_NORMAL;
+                lf.lfQuality = ANTIALIASED_QUALITY;
+                hFont = ::CreateFontIndirectW(&lf);
+                hFontOld = ::SelectObject(hdc, hFont);
+
+                rc = { cxPaper / 8, cyPaper / 2,
+                       cxPaper * 7 / 8, cyPaper * 8 / 9 };
+                for (ichOld = ich = 0;
+                     rc.bottom <= cyPaper * 8 / 9;
+                     ichOld = ich + 1)
+                {
+                    ich = strHints.find(L"\n", ichOld);
+                    if (ich == XGStringW::npos)
+                        break;
+                    str = strHints.substr(0, ich);
+                    rc = { cxPaper / 8, yLast,
+                           cxPaper * 7 / 8, cyPaper * 8 / 9 };
+                    ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
+                        DT_LEFT | DT_TOP | DT_CALCRECT |
+                        DT_NOPREFIX | DT_WORDBREAK);
+                }
+
+                rc = { cxPaper / 8, yLast,
+                       cxPaper * 7 / 8, cyPaper * 8 / 9 };
+                if (ich == XGStringW::npos) {
+                    str = strHints;
+                    ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
+                        DT_LEFT | DT_TOP | DT_NOCLIP |
+                        DT_NOPREFIX | DT_WORDBREAK);
+                    strHints.clear();
+                } else {
+                    str = strHints.substr(0, ichOld);
+                    ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
+                        DT_LEFT | DT_TOP | DT_NOCLIP |
+                        DT_NOPREFIX | DT_WORDBREAK);
+                    strHints = strHints.substr(ichOld);
+                }
+
+                ::SelectObject(hdc, hFontOld);
+                ::DeleteFont(hFont);
+            }
+
+            ::EndPage(hdc);
+        }
+
+        // Print remaining clues on a second page only if necessary.
+        if (!strHints.empty()) {
+            if (::StartPage(hdc) > 0) {
+                hFont = static_cast<HFONT>(::GetStockObject(DEFAULT_GUI_FONT));
+                ::GetObjectW(hFont, sizeof(LOGFONTW), &lf);
+                StringCchCopy(lf.lfFaceName, _countof(lf.lfFaceName),
+                              XgLoadStringDx1(IDS_MONOFONT));
+
+                if (bLandscape)
+                    lf.lfHeight = -MulDiv(7, nLogPixelY, 72);
+                else
+                    lf.lfHeight = cyPaper / 2 / 45;
+
+                lf.lfWidth = 0;
+                lf.lfWeight = FW_NORMAL;
+                lf.lfQuality = ANTIALIASED_QUALITY;
+
                 hFont = ::CreateFontIndirectW(&lf);
                 hFontOld = ::SelectObject(hdc, hFont);
                 str = strHints;
-                rc = { cxPaper / 8, cyPaper / 9, cxPaper * 7 / 8, cyPaper * 8 / 9 };
+
+                if (bLandscape)
+                    rc = { cxPaper / 12, cyPaper / 10,
+                           cxPaper * 11 / 12, cyPaper * 9 / 10 };
+                else
+                    rc = { cxPaper / 8, cyPaper / 9,
+                           cxPaper * 7 / 8, cyPaper * 8 / 9 };
+
                 ::DrawTextW(hdc, str.data(), static_cast<int>(str.size()), &rc,
-                    DT_LEFT | DT_TOP | DT_NOCLIP | DT_NOPREFIX | DT_WORDBREAK);
+                    DT_LEFT | DT_TOP | DT_NOCLIP |
+                    DT_NOPREFIX | DT_WORDBREAK);
+
                 ::SelectObject(hdc, hFontOld);
                 ::DeleteFont(hFont);
-
-                // ページ終了。
                 ::EndPage(hdc);
             }
         }
-        // 文書終了。
+
         ::EndDoc(hdc);
     }
 
