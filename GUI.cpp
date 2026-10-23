@@ -3430,19 +3430,20 @@ void __fastcall XgShowResults(HWND hwnd, BOOL bOK)
 }
 
 // 自動的にPAT.txtから選んで問題を作成する。
+// Automatically choose a matching pattern from PAT.txt and generate a puzzle.
 TRIVALUE XgGenerateFromPat(HWND hwnd)
 {
-    // パターンデータを読み込む。
+    // Load pattern data.
     patterns_t patterns;
     WCHAR szPath[MAX_PATH];
     XgFindLocalFile(szPath, _countof(szPath), L"PAT.txt");
     if (!XgLoadPatterns(szPath, patterns))
-        return TV_NEGATIVE; // 失敗。
+        return TV_NEGATIVE;
 
-    // ソートして一意化する。
+    // Sort and remove duplicates.
     XgSortAndUniquePatterns(patterns, TRUE);
 
-    // サイズとルールが一致しているものを抽出する。
+    // Keep only patterns matching the requested size and active rules.
     patterns_t tmp;
     for (const auto& pat : patterns) {
         if (pat.num_columns != xg_nCols || pat.num_rows != xg_nRows)
@@ -3453,68 +3454,87 @@ TRIVALUE XgGenerateFromPat(HWND hwnd)
     }
     patterns = std::move(tmp);
 
-    // 対応するパターンがなければ確認。
+    // No matching pattern?
     if (patterns.empty()) {
         INT id = XgCenterMessageBoxW(hwnd, XgLoadStringDx1(IDS_NOMATCHPAT), nullptr,
                                      MB_ICONINFORMATION | MB_YESNOCANCEL);
         if (id == IDYES)
-            return TV_NEUTRAL; // 続行する。
-        return TV_NEGATIVE; // 失敗。
+            return TV_NEUTRAL;
+        return TV_NEGATIVE;
     }
 
-#ifdef NO_RANDOM
-    size_t iPat = 0;
-#else
+#ifndef NO_RANDOM
+    // Try matching patterns in a different random order each time.
     std::random_device rd;
     std::mt19937 g(rd());
-    size_t iPat = g() % patterns.size();
+    std::shuffle(patterns.begin(), patterns.end(), g);
 #endif
 
-    // 元に戻す情報を取得。
+    // Save state before PAT selection.
     auto sa1 = std::make_shared<XG_UndoData_SetAll>();
     sa1->Get();
 
-    // コピー＆貼り付け。
-    auto& pat = patterns[iPat];
-    XgPasteBoard(hwnd, pat.text);
-    XgUpdateImage(hwnd);
+    std::shared_ptr<XG_UndoData_SetAll> sa2;
 
-    // 元に戻す情報を設定。
-    auto sa2 = std::make_shared<XG_UndoData_SetAll>();
-    sa2->Get();
-    xg_ubUndoBuffer.Commit(UC_SETALL, sa1, sa2);
+    // XWordGiver 5.4.2 normally tries only one random PAT pattern.
+    // Try every matching pattern until one can be solved.
+    for (const auto& pat : patterns) {
+        xg_bSolved = false;
+        xg_bCheckingAnswer = false;
+        xg_bShowAnswer = false;
+        xg_bCancelled = false;
+        xg_solution.clear();
 
-    // 解を求める（黒マス追加なし）。結果を表示しない。
-    XgOnSolve_NoAddBlackNoResults(hwnd);
+        // Paste pattern.
+        XgPasteBoard(hwnd, pat.text);
+        XgUpdateImage(hwnd);
+
+        // Remember the unsolved pattern state for Undo.
+        auto patState = std::make_shared<XG_UndoData_SetAll>();
+        patState->Get();
+        sa2 = patState;
+
+        // Solve without adding black cells and without showing a result message.
+        XgOnSolve_NoAddBlackNoResults(hwnd);
+
+        // A real user cancellation must stop the complete PAT search.
+        if (xg_bCancelled)
+            break;
+
+        // Success: keep this pattern/solution.
+        if (xg_bSolved)
+            break;
+    }
+
+    // Preserve the normal Undo step for the selected/last pattern.
+    if (sa2)
+        xg_ubUndoBuffer.Commit(UC_SETALL, sa1, sa2);
 
     xg_bShowAnswer = xg_bShowAnswerOnGenerate;
     XgUpdateImage(hwnd);
 
     if (xg_bSolved) {
         XgTaskbarFinish();
-        // 番号とヒントを付ける。
+
+        // Number cells and update clues.
         xg_solution.DoNumberingNoCheck();
         XgUpdateHints();
 
-        // 元に戻す情報を設定。
+        // Preserve the normal second Undo step (pattern -> solved puzzle).
         auto sa3 = std::make_shared<XG_UndoData_SetAll>();
         sa3->Get();
-        xg_ubUndoBuffer.Commit(UC_SETALL, sa2, sa3);
+        if (sa2)
+            xg_ubUndoBuffer.Commit(UC_SETALL, sa2, sa3);
 
-        // 自動保存なら自動保存する。
-        if (xg_bAutoSave) {
+        if (xg_bAutoSave)
             XgNumberingSave(hwnd, FALSE);
-        }
 
-        // 結果を表示する。
         XgShowResults(hwnd, TRUE);
     } else {
         XgTaskbarClear();
-        // 結果を表示する。
         XgShowResults(hwnd, FALSE);
     }
 
-    // 成功か失敗。
     return xg_bSolved ? TV_POSITIVE : TV_NEGATIVE;
 }
 
