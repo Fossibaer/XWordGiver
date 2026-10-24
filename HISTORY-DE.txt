@@ -1,0 +1,15 @@
+XWordGiver-DE – Versionshistorie
+
+5.4.2-de1
+-----------
+- Deutsche PAT-Muster als Standard eingerichtet
+- Deutsches Wörterbuch mit Hinweisen und Themen-Tags hinzugefügt
+- Deutsche PAT-Muster für 5x5 bis 15x15 ergänzt
+- PAT-Umschalter für deutsche und englische Muster hinzugefügt
+- Querformatdruck ergänzt:
+  Rätsel links, Hinweise rechts
+- Automatische PAT-Auswahl verbessert:
+  Bei nicht lösbaren Mustern werden weitere passende Muster ausprobiert
+- Eigene Registry-Schlüssel für XWordGiver-DE32 und XWordGiver-DE64
+- Deutsche Regel-Dokumentation Policy-DEU.txt hinzugefügt
+- README-DE.md hinzugefügt
