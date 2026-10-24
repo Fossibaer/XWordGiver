@@ -1,0 +1,44 @@
+﻿# XWordGiver-Regeln
+
+XWordGiver erzeugt Kreuzworträtsel nach den ausgewählten Regeln.
+Wählen Sie vor der Erstellung die gewünschten Regeln im Menü „Regeln“ aus.
+
+Mehrere Regeln können gleichzeitig aktiviert werden.
+Je nach Kombination kann sich die benötigte Rechenzeit deutlich erhöhen.
+
+## Regel: „Keine benachbarten Schwarzfelder“ [Aufwand: +10 %]
+
+Verhindert, dass Schwarzfelder direkt nebeneinander liegen.
+
+## Regel: „Keine Schwarzfelder in den vier Ecken“ [Aufwand: +5 %]
+
+Verhindert, dass in einer der vier Ecken des Rätsels ein Schwarzfeld gesetzt wird.
+
+## Regel: „Keine dreiseitig umgebenen Schwarzfelder“ [Aufwand: +30 %]
+
+Verhindert Schwarzfelder, die auf drei Seiten direkt an weitere Schwarzfelder angrenzen.
+
+## Regel: „Keine Teilung durch Schwarzfelder“ [Aufwand: +20 %] (nicht änderbar)
+
+Verhindert, dass Schwarzfelder das Rätsel in voneinander getrennte Bereiche aufteilen.
+
+## Regel: „Keine drei diagonal angeordneten Schwarzfelder“ [Aufwand: +35 %]
+
+Verhindert drei Schwarzfelder, die in drei aufeinanderfolgenden Zeilen diagonal angeordnet sind.
+
+## Regel: „Keine vier diagonal angeordneten Schwarzfelder“ [Aufwand: +20 %]
+
+Verhindert vier Schwarzfelder, die in vier aufeinanderfolgenden Zeilen diagonal angeordnet sind.
+
+## Regel: „Punktsymmetrische Schwarzfelder“ [Aufwand: -45 %]
+
+Erzwingt eine Punktsymmetrie der Schwarzfelder.
+Das Muster bleibt also bei einer Drehung um 180 Grad unverändert.
+
+## Regel: „Vertikal symmetrische Schwarzfelder“ [Aufwand: +10 %]
+
+Erzwingt eine Spiegelung der Schwarzfelder an der vertikalen Mittelachse.
+
+## Regel: „Horizontal symmetrische Schwarzfelder“ [Aufwand: +10 %]
+
+Erzwingt eine Spiegelung der Schwarzfelder an der horizontalen Mittelachse.
