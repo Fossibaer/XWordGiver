@@ -336,9 +336,9 @@ int xg_nInputPaletteWndX = CW_USEDEFAULT, xg_nInputPaletteWndY = CW_USEDEFAULT;
 
 // 会社名とアプリ名。
 #ifdef _WIN64
-    #define XG_REGKEY_APP L"Software\\Katayama Hirofumi MZ\\XWord64"
+    #define XG_REGKEY_APP L"Software\\Opensource-DVD\\XWordGiver-DE64"
 #else
-    #define XG_REGKEY_APP L"Software\\Katayama Hirofumi MZ\\XWord32"
+    #define XG_REGKEY_APP L"Software\\Opensource-DVD\\XWordGiver-DE32"
 #endif
 
 // 再計算するか？
